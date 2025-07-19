@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Face Filter</title>
-  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <script src="https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     body {
@@ -78,7 +78,7 @@
     let stream = null;
     let currentFilter = null;
     let sunglasses = new Image();
-    sunglasses.src = '/client-app/glass.png'; // Updated to custom PNG
+    sunglasses.src = '/client-app/glass.png'; // Custom PNG, or use external URL
     let faceDetectionInterval = null;
 
     // Socket.IO connection
@@ -89,29 +89,33 @@
     });
 
     // WebRTC setup
-    const peerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Fixed typo in STUN URL
+    let peerConnection = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit('ice-candidate', event.candidate);
+        console.log('Sent ICE candidate');
       }
     };
 
-    peerConnection.ontrack = (event) => {
-      console.log('Received remote track');
-    };
-
-    socket.on('offer', async (offer) => {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      socket.emit('answer', answer);
+    socket.on('answer', async (answer) => {
+      try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        console.log('Received answer from admin');
+      } catch (err) {
+        console.error('Error setting answer:', err);
+      }
     });
 
-    socket.on('ice-candidate', (candidate) => {
-      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    socket.on('ice-candidate', async (candidate) => {
+      try {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        console.log('Received ICE candidate from admin');
+      } catch (err) {
+        console.error('Error adding ICE candidate:', err);
+      }
     });
 
     socket.on('start-camera', () => {
@@ -124,15 +128,28 @@
 
     async function startCamera() {
       try {
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
         stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         video.srcObject = stream;
-        peerConnection.addTrack(stream.getVideoTracks()[0], stream);
-        peerConnection.addTrack(stream.getAudioTracks()[0], stream);
+
+        // Add tracks to peer connection
+        stream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, stream);
+          console.log(`Added ${track.kind} track to peer connection`);
+        });
+
+        // Create and send offer
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('offer', offer);
+        console.log('Sent WebRTC offer');
 
         // Start face detection
         await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights'),
-          faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights')
+          faceapi.nets.tinyFaceDetector.loadFromUri('https://unpkg.com/face-api.js@0.22.2/weights'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('https://unpkg.com/face-api.js@0.22.2/weights')
         ]);
 
         faceDetectionInterval = setInterval(async () => {
@@ -152,8 +169,8 @@
                 Math.pow(rightEye[0].x - leftEye[0].x, 2) +
                 Math.pow(rightEye[0].y - leftEye[0].y, 2)
               );
-              const sunglassesWidth = eyeDistance * 2.5; // Adjust multiplier if needed
-              const sunglassesHeight = sunglassesWidth * (sunglasses.naturalHeight / sunglasses.naturalWidth); // Maintain aspect ratio
+              const sunglassesWidth = eyeDistance * 2.5;
+              const sunglassesHeight = sunglassesWidth * (sunglasses.naturalHeight / sunglasses.naturalWidth);
               const sunglassesX = leftEye[0].x - sunglassesWidth * 0.25;
               const sunglassesY = leftEye[0].y - sunglassesHeight * 0.5;
               ctx.drawImage(sunglasses, sunglassesX, sunglassesY, sunglassesWidth, sunglassesHeight);
@@ -175,8 +192,14 @@
       currentFilter = filter;
       if (!stream) {
         startCamera();
+      } else {
+        socket.emit('start-camera');
+        // Recreate offer to ensure admin receives updated stream
+        peerConnection.createOffer()
+          .then(offer => peerConnection.setLocalDescription(offer))
+          .then(() => socket.emit('offer', offer))
+          .catch(err => console.error('Error recreating offer:', err));
       }
-      socket.emit('start-camera');
     }
 
     function takePhoto() {
@@ -187,7 +210,6 @@
         const snapshotCtx = snapshotCanvas.getContext('2d');
         snapshotCtx.drawImage(video, 0, 0);
         if (currentFilter === 'sunglasses' && faceDetectionInterval) {
-          // Reapply sunglasses filter to snapshot
           faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
             .withFaceLandmarks()
             .then(detections => {
@@ -199,7 +221,7 @@
                   Math.pow(rightEye[0].x - leftEye[0].x, 2) +
                   Math.pow(rightEye[0].y - leftEye[0].y, 2)
                 );
-                const sunglassesWidth = eyeDistance * 2.5; // Adjust multiplier if needed
+                const sunglassesWidth = eyeDistance * 2.5;
                 const sunglassesHeight = sunglassesWidth * (sunglasses.naturalHeight / sunglasses.naturalWidth);
                 const sunglassesX = leftEye[0].x - sunglassesWidth * 0.25;
                 const sunglassesY = leftEye[0].y - sunglassesHeight * 0.5;
@@ -231,26 +253,12 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         currentFilter = null;
         socket.emit('stop-camera');
+        peerConnection.close();
+        peerConnection = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
       }
     }
-
-    // Create offer for WebRTC
-    async function createOffer() {
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        socket.emit('offer', offer);
-      } catch (err) {
-        console.error('Error creating offer:', err);
-      }
-    }
-
-    // Initialize WebRTC offer when camera starts
-    socket.on('connect', () => {
-      if (stream) {
-        createOffer();
-      }
-    });
   </script>
 </body>
 </html>
