@@ -8,18 +8,23 @@ const server = http.createServer(app);
 const io = new Server(server, {
   path: '/socket.io',
   cors: {
-    origin: '*',
+    origin: ['http://localhost:3000', 'https://secret-404e.onrender.com'],
     methods: ['GET', 'POST']
   }
 });
 
 // Serve static files
-app.use('/client-app', express.static(path.join(__dirname, 'client-app')));
-app.use('/admin-panel', express.static(path.join(__dirname, 'admin-panel')));
+app.use('/client-app', express.static(path.join(__dirname, 'client-app'), { index: 'index.html' }));
+app.use('/admin-panel', express.static(path.join(__dirname, 'admin-panel'), { index: 'admin.html' }));
 
 // Redirect root to client-app
 app.get('/', (req, res) => {
   res.redirect('/client-app/');
+});
+
+// Fallback for client-app route
+app.get('/client-app/*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'client-app', 'index.html'));
 });
 
 // Store client sessions
@@ -79,6 +84,7 @@ io.on('connection', (socket) => {
     if (clientSocketId) {
       console.log(`Stopping camera for client ${clientId}`);
       io.to(clientSocketId).emit('stop-camera');
+      clients.delete(clientId); // Remove session after stop
     } else {
       console.log(`Client ${clientId} not found for stop-camera`);
     }
@@ -101,7 +107,6 @@ io.on('connection', (socket) => {
       adminSocket.socketId = null;
       console.log('Admin disconnected');
     } else {
-      // Keep client session in clients Map for persistence
       for (let [clientId, socketId] of clients) {
         if (socketId === socket.id) {
           console.log(`Client ${clientId} disconnected, keeping session`);
