@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const fs = require('fs').promises;
 const path = require('path');
+const cors = require('cors'); // Added for Express CORS
 
 const app = express();
 const server = http.createServer(app);
@@ -14,6 +15,12 @@ const io = new Server(server, {
   }
 });
 
+// Add Express CORS middleware
+app.use(cors({
+  origin: ['http://localhost:3000', 'https://secret-404e.onrender.com'],
+  methods: ['GET', 'POST']
+}));
+
 // Serve static files
 app.use('/client-app', express.static(path.join(__dirname, '..', 'client-app'), {
   index: 'index.html'
@@ -21,19 +28,6 @@ app.use('/client-app', express.static(path.join(__dirname, '..', 'client-app'), 
 app.use('/admin-panel', express.static(path.join(__dirname, '..', 'admin-panel'), {
   index: 'admin.html'
 }));
-
-// Debug route for /admin-panel/
-app.get('/admin-panel/', async (req, res) => {
-  const filePath = path.join(__dirname, '..', 'admin-panel', 'admin.html');
-  console.log(`Attempting to serve admin.html from: ${filePath}`);
-  try {
-    await fs.access(filePath);
-    res.sendFile(filePath);
-  } catch (err) {
-    console.error(`Error serving admin.html: ${err.message}`);
-    res.status(404).send('Admin panel not found');
-  }
-});
 
 // Debug route for /client-app/
 app.get('/client-app/', async (req, res) => {
@@ -48,15 +42,31 @@ app.get('/client-app/', async (req, res) => {
   }
 });
 
+// Debug route for /admin-panel/
+app.get('/admin-panel/', async (req, res) => {
+  const filePath = path.join(__dirname, '..', 'admin-panel', 'admin.html');
+  console.log(`Attempting to serve admin.html from: ${filePath}`);
+  try {
+    await fs.access(filePath);
+    res.sendFile(filePath);
+  } catch (err) {
+    console.error(`Error serving admin.html: ${err.message}`);
+    res.status(404).send('Admin panel not found');
+  }
+});
+
 // Ensure logs directory exists
-const logDir = path.join(__dirname, 'logs');
+const logDir = process.env.NODE_ENV === 'production' ? '/tmp/logs' : path.join(__dirname, 'logs');
 const logFile = path.join(logDir, 'access.log');
 
 async function initializeLogs() {
   try {
     await fs.mkdir(logDir, { recursive: true });
+    console.log(`Logs directory created at: ${logDir}`);
+    // Ensure log file exists
+    await fs.writeFile(logFile, '', { flag: 'a' });
   } catch (err) {
-    console.error('Error creating logs directory:', err);
+    console.error('Error creating logs directory or file:', err);
   }
 }
 
@@ -71,7 +81,10 @@ async function logEvent(event) {
   }
 }
 
-initializeLogs();
+// Initialize logs and wait for completion
+(async () => {
+  await initializeLogs();
+})();
 
 // Serve a basic endpoint
 app.get('/', (req, res) => {
