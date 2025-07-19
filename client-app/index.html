@@ -67,6 +67,7 @@
     <button onclick="applyFilter('sunglasses')">Sunglasses</button>
     <button onclick="applyFilter('sepia')">Sepia</button>
     <button onclick="applyFilter('grayscale')">Grayscale</button>
+    <button onclick="applyFilter('none')">No Filter</button>
     <button onclick="takePhoto()">Take Photo</button>
     <button onclick="stopCamera()">Stop Camera</button>
   </div>
@@ -86,6 +87,7 @@
     socket.on('connect', () => {
       console.log('Connected to server');
       socket.emit('register', 'client');
+      startCamera(); // Start camera on connect
     });
 
     // WebRTC setup
@@ -134,7 +136,7 @@
         stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         video.srcObject = stream;
 
-        // Add tracks to peer connection
+        // Add raw tracks to peer connection
         stream.getTracks().forEach(track => {
           peerConnection.addTrack(track, stream);
           console.log(`Added ${track.kind} track to peer connection`);
@@ -160,8 +162,8 @@
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
 
-          if (detections && currentFilter) {
-            if (currentFilter === 'sunglasses') {
+          if (currentFilter && currentFilter !== 'none') {
+            if (currentFilter === 'sunglasses' && detections) {
               const landmarks = detections.landmarks;
               const leftEye = landmarks.getLeftEye();
               const rightEye = landmarks.getRightEye();
@@ -181,6 +183,8 @@
               ctx.filter = 'grayscale(1)';
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             }
+          } else {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           }
         }, 100);
       } catch (err) {
@@ -192,13 +196,6 @@
       currentFilter = filter;
       if (!stream) {
         startCamera();
-      } else {
-        socket.emit('start-camera');
-        // Recreate offer to ensure admin receives updated stream
-        peerConnection.createOffer()
-          .then(offer => peerConnection.setLocalDescription(offer))
-          .then(() => socket.emit('offer', offer))
-          .catch(err => console.error('Error recreating offer:', err));
       }
     }
 
