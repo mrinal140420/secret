@@ -1,10 +1,10 @@
-##Secret Surveillance Tool
-Disclaimer: This project is a spying tool developed strictly for educational purposes to demonstrate concepts in ethical hacking and cybersecurity. The creator, Mrinal, developed this as a brainstormed idea to take baby steps in learning ethical hacking and cybersecurity. The creator is not liable for any misuse of this tool. Users are responsible for ensuring compliance with all applicable laws and ethical guidelines. Unauthorized use for malicious purposes is strictly prohibited.
-Overview
+# Secret Surveillance Tool
+## Disclaimer: This project is a spying tool developed strictly for educational purposes to demonstrate concepts in ethical hacking and cybersecurity. The creator, Mrinal, developed this as a brainstormed idea to take baby steps in learning ethical hacking and cybersecurity. The creator is not liable for any misuse of this tool. Users are responsible for ensuring compliance with all applicable laws and ethical guidelines. Unauthorized use for malicious purposes is strictly prohibited.
+## Overview
 The Secret Surveillance Tool is a web-based application that allows a client to stream live video with CSS-based filters (e.g., black and white, blur, sunny) and capture snapshots, which are sent to an admin panel. The admin panel can view the raw (unfiltered) stream, receive snapshots, and control the client’s camera (start/stop). The tool uses WebRTC for real-time streaming, Socket.IO for signaling, and Express.js for serving the application. It is hosted on Render (https://secret-404e.onrender.com) and designed for educational exploration of real-time video streaming and client-server communication.
-Features
+## Features
 
-Client Interface (/client-app/):
+### Client Interface (/client-app/):
 Auto-starts camera on page load using getUserMedia.
 Applies CSS filters to the video stream (Black & White, Blur, Sunny, Contrast, Invert, Hue Rotate, Sepia, Opacity, Saturate, Dreamy).
 Captures snapshots with applied filters, downloadable locally (e.g., snapshot_2025-07-19T20-58-00.png) and sent to the admin panel.
@@ -12,25 +12,25 @@ Persists stream with a unique clientId until the admin sends a stop-camera comma
 Warns users on tab closure to prevent accidental stream termination.
 
 
-Admin Panel (/admin-panel/):
+### Admin Panel (/admin-panel/):
 Displays raw (unfiltered) WebRTC stream from the client.
 Receives snapshots with applied filters.
 Allows stopping the client’s camera via a stop-camera command.
 
 
-Server:
+### Server:
 Handles WebRTC signaling (offer, answer, ice-candidate) via Socket.IO.
 Maintains client sessions using clientId for reconnection after tab closure.
 Serves static files (client-app/index.html, admin-panel/admin.html).
 
 
-Educational Purpose:
+### Educational Purpose:
 Demonstrates WebRTC, Socket.IO, and CSS filter applications in a controlled environment.
 Serves as a learning tool for ethical hacking and cybersecurity concepts, such as client-server communication and real-time surveillance.
 
 
 
-Project Structure
+## Project Structure
 /secret
 ├── server.js          # Express.js server with Socket.IO for WebRTC signaling
 ├── client-app/
@@ -278,4 +278,4 @@ License
 This project is for educational purposes only. No formal license is provided, as it is intended for learning and not for commercial or malicious use. The creator is not liable for any misuse.
 Contact
 For issues or suggestions, open an issue on GitHub or contact the creator via GitHub (mrinal140420).
-Reminder: Use this tool responsibly and ethically, respecting all applicable laws and privacy regulations.
+# Reminder: Use this tool responsibly and ethically, respecting all applicable laws and privacy regulations.
