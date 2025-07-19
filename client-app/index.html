@@ -31,6 +31,7 @@
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
+      justify-content: center;
     }
     button {
       padding: 10px 20px;
@@ -58,6 +59,7 @@
     .sepia { filter: sepia(100%); }
     .opacity { filter: opacity(50%); }
     .saturate { filter: saturate(200%); }
+    .dreamy { filter: blur(3px) grayscale(50%) brightness(1.2); }
   </style>
 </head>
 <body>
@@ -75,6 +77,7 @@
     <button onclick="applyFilter('sepia')">Sepia</button>
     <button onclick="applyFilter('opacity')">Opacity</button>
     <button onclick="applyFilter('saturate')">Saturate</button>
+    <button onclick="applyFilter('dreamy')">Dreamy</button>
     <button onclick="applyFilter('none')">No Filter</button>
     <button onclick="takePhoto()">Take Photo</button>
     <button onclick="stopCamera()">Stop Camera</button>
@@ -100,6 +103,10 @@
       console.log('Connected to server');
       socket.emit('register', 'client', clientId);
       startCamera();
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('Socket.IO connection error:', err);
     });
 
     // WebRTC setup
@@ -145,7 +152,7 @@
         if (stream) {
           stream.getTracks().forEach(track => track.stop());
         }
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true });
         video.srcObject = stream;
 
         // Add raw tracks to peer connection
@@ -166,7 +173,7 @@
 
     function applyFilter(filter) {
       currentFilter = filter;
-      video.classList.remove('grayscale', 'blur', 'sunny', 'contrast', 'invert', 'hue-rotate', 'sepia', 'opacity', 'saturate');
+      video.classList.remove('grayscale', 'blur', 'sunny', 'contrast', 'invert', 'hue-rotate', 'sepia', 'opacity', 'saturate', 'dreamy');
       if (filter !== 'none') {
         video.classList.add(filter);
       }
@@ -201,6 +208,8 @@
           snapshotCtx.filter = 'opacity(50%)';
         } else if (currentFilter === 'saturate') {
           snapshotCtx.filter = 'saturate(200%)';
+        } else if (currentFilter === 'dreamy') {
+          snapshotCtx.filter = 'blur(3px) grayscale(50%) brightness(1.2)';
         }
         snapshotCtx.drawImage(video, 0, 0);
 
@@ -228,7 +237,7 @@
         stream.getTracks().forEach(track => track.stop());
         stream = null;
         video.srcObject = null;
-        video.classList.remove('grayscale', 'blur', 'sunny', 'contrast', 'invert', 'hue-rotate', 'sepia', 'opacity', 'saturate');
+        video.classList.remove('grayscale', 'blur', 'sunny', 'contrast', 'invert', 'hue-rotate', 'sepia', 'opacity', 'saturate', 'dreamy');
         currentFilter = null;
         socket.emit('stop-camera', clientId);
         peerConnection.close();
