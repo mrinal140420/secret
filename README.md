@@ -1,4 +1,4 @@
-Secret Surveillance Tool
+##Secret Surveillance Tool
 Disclaimer: This project is a spying tool developed strictly for educational purposes to demonstrate concepts in ethical hacking and cybersecurity. The creator, Mrinal, developed this as a brainstormed idea to take baby steps in learning ethical hacking and cybersecurity. The creator is not liable for any misuse of this tool. Users are responsible for ensuring compliance with all applicable laws and ethical guidelines. Unauthorized use for malicious purposes is strictly prohibited.
 Overview
 The Secret Surveillance Tool is a web-based application that allows a client to stream live video with CSS-based filters (e.g., black and white, blur, sunny) and capture snapshots, which are sent to an admin panel. The admin panel can view the raw (unfiltered) stream, receive snapshots, and control the client’s camera (start/stop). The tool uses WebRTC for real-time streaming, Socket.IO for signaling, and Express.js for serving the application. It is hosted on Render (https://secret-404e.onrender.com) and designed for educational exploration of real-time video streaming and client-server communication.
