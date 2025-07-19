@@ -1,161 +1,147 @@
-
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
-const fs = require('fs').promises;
+const socketIo = require('socket.io');
+const cors = require('cors');
 const path = require('path');
-const cors = require('cors'); // Added for Express CORS
-
+const fs = require('fs').promises;
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
+const io = socketIo(server, {
   cors: {
     origin: ['http://localhost:3000', 'https://secret-404e.onrender.com'],
     methods: ['GET', 'POST']
   }
 });
 
-// Add Express CORS middleware
 app.use(cors({
   origin: ['http://localhost:3000', 'https://secret-404e.onrender.com'],
   methods: ['GET', 'POST']
 }));
 
 // Serve static files
-app.use('/client-app', express.static(path.join(__dirname, '..', 'client-app'), {
-  index: 'index.html'
-}));
-app.use('/admin-panel', express.static(path.join(__dirname, '..', 'admin-panel'), {
-  index: 'admin.html'
-}));
+app.use('/client-app', express.static(path.join(__dirname, '..', 'client-app'), { index: 'index.html' }));
+app.use('/admin-panel', express.static(path.join(__dirname, '..', 'admin-panel'), { index: 'admin.html' }));
 
-// Debug route for /client-app/
-app.get('/client-app/', async (req, res) => {
-  const filePath = path.join(__dirname, '..', 'client-app', 'index.html');
-  console.log(`Attempting to serve index.html from: ${filePath}`);
-  try {
-    await fs.access(filePath);
-    res.sendFile(filePath);
-  } catch (err) {
-    console.error(`Error serving index.html: ${err.message}`);
-    res.status(404).send('Client app not found');
-  }
-});
-
-// Debug route for /admin-panel/
-app.get('/admin-panel/', async (req, res) => {
-  const filePath = path.join(__dirname, '..', 'admin-panel', 'admin.html');
-  console.log(`Attempting to serve admin.html from: ${filePath}`);
-  try {
-    await fs.access(filePath);
-    res.sendFile(filePath);
-  } catch (err) {
-    console.error(`Error serving admin.html: ${err.message}`);
-    res.status(404).send('Admin panel not found');
-  }
-});
-
-// Ensure logs directory exists
-const logDir = process.env.NODE_ENV === 'production' ? '/tmp/logs' : path.join(__dirname, 'logs');
-const logFile = path.join(logDir, 'access.log');
-
-async function initializeLogs() {
+// Logging setup
+const logDir = '/tmp/logs';
+async function ensureLogDir() {
   try {
     await fs.mkdir(logDir, { recursive: true });
     console.log(`Logs directory created at: ${logDir}`);
-    // Ensure log file exists
-    await fs.writeFile(logFile, '', { flag: 'a' });
   } catch (err) {
-    console.error('Error creating logs directory or file:', err);
+    console.error('Error creating logs directory:', err);
   }
 }
+ensureLogDir();
 
-// Log events to file
-async function logEvent(event) {
+async function logEvent(message) {
   const timestamp = new Date().toISOString();
-  const logEntry = `${timestamp} - ${event}\n`;
+  const logMessage = `[${timestamp}] ${message}\n`;
   try {
-    await fs.appendFile(logFile, logEntry);
+    await fs.appendFile(path.join(logDir, 'app.log'), logMessage);
+    console.log(logMessage.trim());
   } catch (err) {
     console.error('Error writing to log file:', err);
   }
 }
 
-// Initialize logs and wait for completion
-(async () => {
-  await initializeLogs();
-})();
+// Store client sessions
+const clientSessions = new Map(); // clientId -> { socketId, offer }
 
-// Serve a basic endpoint
-app.get('/', (req, res) => {
-  res.send('Remote Camera Control Server');
-});
-
-// Track client and admin
-let clientSocket = null;
 let adminSocket = null;
 
-// Socket.IO connection
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-  logEvent(`Client connected: ${socket.id}`);
-
-  socket.on('connect_error', (err) => {
-    console.error('Socket.IO connection error:', err.message);
-    logEvent(`Socket.IO connection error: ${err.message}`);
-  });
-
-  // Register client or admin
-  socket.on('register', (role) => {
-    if (role === 'client') {
-      clientSocket = socket;
-      logEvent(`Client registered: ${socket.id}`);
-    } else if (role === 'admin') {
+  socket.on('register', (type, clientId) => {
+    if (type === 'client' && clientId) {
+      clientSessions.set(clientId, { socketId: socket.id, offer: null });
+      logEvent(`Client registered: ${clientId} with socket ${socket.id}`);
+    } else if (type === 'admin') {
       adminSocket = socket;
-      logEvent(`Admin registered: ${socket.id}`);
+      logEvent(`Admin connected: ${socket.id}`);
+      // Send existing client offers to admin
+      clientSessions.forEach((session, clientId) => {
+        if (session.offer) {
+          adminSocket.emit('offer', session.offer, clientId);
+        }
+      });
     }
   });
 
-  // Handle WebRTC signaling
-  socket.on('offer', (offer) => {
+  socket.on('offer', (offer, clientId) => {
+    if (clientId && clientSessions.has(clientId)) {
+      clientSessions.get(clientId).offer = offer;
+      logEvent(`Offer received from client ${clientId}`);
+      if (adminSocket) {
+        adminSocket.emit('offer', offer, clientId);
+        logEvent(`Offer sent to admin from client ${clientId}`);
+      }
+    }
+  });
+
+  socket.on('answer', (answer, clientId) => {
+    if (clientSessions.has(clientId)) {
+      const clientSocketId = clientSessions.get(clientId).socketId;
+      io.to(clientSocketId).emit('answer', answer);
+      logEvent(`Answer sent to client ${clientId}`);
+    }
+  });
+
+  socket.on('ice-candidate', (candidate, clientId) => {
+    if (clientId) {
+      if (clientSessions.has(clientId)) {
+        if (adminSocket) {
+          adminSocket.emit('ice-candidate', candidate, clientId);
+          logEvent(`ICE candidate sent to admin from client ${clientId}`);
+        }
+      } else if (adminSocket && socket.id === adminSocket.id) {
+        const clientSocketId = clientSessions.get(clientId)?.socketId;
+        if (clientSocketId) {
+          io.to(clientSocketId).emit('ice-candidate', candidate);
+          logEvent(`ICE candidate sent to client ${clientId}`);
+        }
+      }
+    }
+  });
+
+  socket.on('start-camera', (clientId) => {
+    if (clientSessions.has(clientId)) {
+      const clientSocketId = clientSessions.get(clientId).socketId;
+      io.to(clientSocketId).emit('start-camera');
+      logEvent(`Start camera command sent to client ${clientId}`);
+    }
+  });
+
+  socket.on('stop-camera', (clientId) => {
+    if (clientSessions.has(clientId)) {
+      const clientSocketId = clientSessions.get(clientId).socketId;
+      io.to(clientSocketId).emit('stop-camera');
+      clientSessions.delete(clientId); // Remove session on stop
+      logEvent(`Stop camera command sent to client ${clientId}, session removed`);
+    }
+  });
+
+  socket.on('snapshot', (data, clientId) => {
     if (adminSocket) {
-      adminSocket.emit('offer', offer);
-      logEvent(`Offer sent from client ${socket.id} to admin`);
-    }
-  });
-
-  socket.on('answer', (answer) => {
-    if (clientSocket) {
-      clientSocket.emit('answer', answer);
-      logEvent(`Answer sent from admin to client ${clientSocket.id}`);
-    }
-  });
-
-  socket.on('ice-candidate', (candidate) => {
-    if (socket === clientSocket && adminSocket) {
-      adminSocket.emit('ice-candidate', candidate);
-      logEvent(`ICE candidate sent from client ${socket.id} to admin`);
-    } else if (socket === adminSocket && clientSocket) {
-      clientSocket.emit('ice-candidate', candidate);
-      logEvent(`ICE candidate sent from admin to client ${clientSocket.id}`);
-    }
-  });
-
-  // Handle admin commands
-  socket.on('admin-command', (command) => {
-    if (clientSocket) {
-      clientSocket.emit(command);
-      logEvent(`Admin sent: ${command}`);
+      adminSocket.emit('snapshot', data, clientId);
+      logEvent(`Snapshot sent from client ${clientId}`);
     }
   });
 
   socket.on('disconnect', () => {
-    if (socket === clientSocket) {
-      clientSocket = null;
-      logEvent(`Client disconnected: ${socket.id}`);
-    } else if (socket === adminSocket) {
+    if (socket.id === adminSocket?.id) {
       adminSocket = null;
       logEvent(`Admin disconnected: ${socket.id}`);
+    } else {
+      let disconnectedClientId = null;
+      clientSessions.forEach((session, clientId) => {
+        if (session.socketId === socket.id) {
+          disconnectedClientId = clientId;
+        }
+      });
+      if (disconnectedClientId) {
+        logEvent(`Client ${disconnectedClientId} disconnected, keeping session`);
+        // Keep session in clientSessions until stop-camera
+      }
     }
   });
 });
@@ -163,5 +149,4 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  logEvent(`Server started on port ${PORT}`);
 });
