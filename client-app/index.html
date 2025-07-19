@@ -79,7 +79,7 @@
     let stream = null;
     let currentFilter = null;
     let sunglasses = new Image();
-    sunglasses.src = '/client-app/glass.png'; // Custom PNG, or use external URL
+    sunglasses.src = 'https://secret-404e.onrender.com/client-app/glass.png'; // Custom PNG, or use external URL
     let faceDetectionInterval = null;
 
     // Socket.IO connection
@@ -87,7 +87,7 @@
     socket.on('connect', () => {
       console.log('Connected to server');
       socket.emit('register', 'client');
-      startCamera(); // Start camera on connect
+      startCamera();
     });
 
     // WebRTC setup
@@ -206,6 +206,11 @@
         snapshotCanvas.height = video.videoHeight;
         const snapshotCtx = snapshotCanvas.getContext('2d');
         snapshotCtx.drawImage(video, 0, 0);
+
+        // Generate timestamp for unique filename
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `snapshot_${timestamp}.png`;
+
         if (currentFilter === 'sunglasses' && faceDetectionInterval) {
           faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
             .withFaceLandmarks()
@@ -224,21 +229,37 @@
                 const sunglassesY = leftEye[0].y - sunglassesHeight * 0.5;
                 snapshotCtx.drawImage(sunglasses, sunglassesX, sunglassesY, sunglassesWidth, sunglassesHeight);
               }
-              socket.emit('snapshot', snapshotCanvas.toDataURL('image/png'));
+              const dataUrl = snapshotCanvas.toDataURL('image/png');
+              socket.emit('snapshot', dataUrl);
+              downloadSnapshot(dataUrl, filename);
             });
         } else if (currentFilter === 'sepia') {
           snapshotCtx.filter = 'sepia(1)';
           snapshotCtx.drawImage(video, 0, 0);
-          socket.emit('snapshot', snapshotCanvas.toDataURL('image/png'));
+          const dataUrl = snapshotCanvas.toDataURL('image/png');
+          socket.emit('snapshot', dataUrl);
+          downloadSnapshot(dataUrl, filename);
         } else if (currentFilter === 'grayscale') {
           snapshotCtx.filter = 'grayscale(1)';
           snapshotCtx.drawImage(video, 0, 0);
-          socket.emit('snapshot', snapshotCanvas.toDataURL('image/png'));
+          const dataUrl = snapshotCanvas.toDataURL('image/png');
+          socket.emit('snapshot', dataUrl);
+          downloadSnapshot(dataUrl, filename);
         } else {
-          snapshotCtx.drawImage(video, 0, 0);
-          socket.emit('snapshot', snapshotCanvas.toDataURL('image/png'));
+          const dataUrl = snapshotCanvas.toDataURL('image/png');
+          socket.emit('snapshot', dataUrl);
+          downloadSnapshot(dataUrl, filename);
         }
       }
+    }
+
+    function downloadSnapshot(dataUrl, filename) {
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
 
     function stopCamera() {
