@@ -9,7 +9,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:3000', 'https://00ee6e6017c1.ngrok-free.app'],
+    origin: ['http://localhost:3000', 'https://secret-404e.onrender.com'],
     methods: ['GET', 'POST']
   }
 });
